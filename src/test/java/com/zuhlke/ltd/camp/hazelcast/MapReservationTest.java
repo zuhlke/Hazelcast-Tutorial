@@ -11,11 +11,13 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class MapReservationTest {
@@ -87,27 +89,44 @@ public class MapReservationTest {
             final int partition = reservationManager.reserve();
             assertThat(partition, is(equalTo(i)));
         }
-        final int midKey = invalidateMiddleMapEntry();
+        final int midKey = ReservationManager.PARTITION_COUNT / 2;
+        invalidateMapEntry(midKey);
         final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, Integer.toString(10000 + WORKER_COUNT));
         final int partition = reservationManager.reserve();
         assertThat(partition, is(equalTo(midKey)));
     }
 
-    private int invalidateMiddleMapEntry() {
-        final int midKey = ReservationManager.PARTITION_COUNT / 2;
+    private String invalidateMapEntry(int key) {
+        final String reservation;
         final TransactionContext context = hazelcastInstance.newTransactionContext();
         try {
             context.beginTransaction();
             final TransactionalMap partitionsMap = context.getMap(ReservationManager.PARTITION_MAP_NAME);
-            final String midReservation = (String) partitionsMap.get(midKey);
-            final String expiredMidReservation = midReservation.replaceFirst("(\"expiryTime\"\\:)\\d+", "$13600");
-            partitionsMap.put(midKey, expiredMidReservation);
+            reservation = (String) partitionsMap.get(key);
+            final String expiredReservation = reservation.replaceFirst("(\"expiryTime\"\\:)\\d+", "$13600");
+            partitionsMap.put(key, expiredReservation);
             context.commitTransaction();
+            return reservation;
         } catch (Throwable t) {
             context.rollbackTransaction();
             t.printStackTrace(System.err);
-            fail("MapReservationTest.invalidateMiddleMapEntry() caught exception: " + t);
+            fail("MapReservationTest.invalidateMapEntry() caught exception: " + t);
         }
-        return midKey;
+        return null;
+    }
+    
+    @Test
+    public void shouldUpdateEntry() throws IOException {
+        final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, "10000");
+        final int partition = reservationManager.reserve();
+        assertThat(partition, is(equalTo(0)));
+        final Date originalExpiryTime = new Date(reservationManager.getExpiryTime().getTime());
+        try {
+            Thread.sleep(20L);
+        } catch (InterruptedException ignored) {
+        }
+        final Date newExpiryTime = reservationManager.refreshTimestamp(partition);
+        assertTrue("New expiry time " + newExpiryTime + " should be greater than " + originalExpiryTime,
+                newExpiryTime.after(originalExpiryTime));
     }
 }
