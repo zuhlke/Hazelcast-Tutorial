@@ -10,26 +10,26 @@ public class MapReservation {
     private static final long WORK_INTERVAL_MILLIS = 5000; // 5 sec
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    private Integer identity;
+    private String workerId;
     private Date expiryTime;
 
     public static MapReservation fromJson(String representation) throws IOException {
         return objectMapper.readValue(representation, MapReservation.class);
     }
 
-    public MapReservation(int identity) {
-        this.identity = identity;
+    public MapReservation(String workerId) {
+        this.workerId = workerId;
         this.expiryTime = new Date();
     }
 
     private MapReservation() {}
 
-    public int getIdentity() {
-        return identity;
+    public String getWorkerId() {
+        return workerId;
     }
 
-    public void setIdentity(int identity) {
-        this.identity = identity;
+    public void setWorkerId(String workerId) {
+        this.workerId = workerId;
     }
 
     public Date getExpiryTime() {

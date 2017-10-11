@@ -1,35 +1,52 @@
 package com.zuhlke.ltd.camp.hazelcast;
 
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.core.TransactionalMap;
+import com.hazelcast.transaction.TransactionContext;
+
 import java.io.IOException;
-import java.util.Map;
 
 class ReservationManager {
     public static final int PARTITION_COUNT = 1000;
+    public static final String PARTITION_MAP_NAME = "partitions";
 
-    private final Map<Integer, String> partitionsMap;
+    //    private final TransactionContext context;
+    private final HazelcastInstance hazelcastInstance;
     private final MapReservation mapReservation;
 
-    public ReservationManager(Map<Integer, String> partitionsMap, int identity) {
-        this.partitionsMap = partitionsMap;
-        this.mapReservation = new MapReservation(identity);
+    public ReservationManager(HazelcastInstance hazelcastInstance, String workerId) {
+        this.hazelcastInstance = hazelcastInstance;
+        this.mapReservation = new MapReservation(workerId);
     }
 
-    public int reserve() throws IOException {
-        final int mapEntry = findVacantMapEntry();
-        if (mapEntry >= 0) {
-            this.mapReservation.setNewExpiryTime();
-            partitionsMap.put(mapEntry, this.mapReservation.toJson());
+    public synchronized int reserve() {
+        final TransactionContext context = hazelcastInstance.newTransactionContext();
+        try {
+            context.beginTransaction();
+            final TransactionalMap partitionsMap = context.getMap(PARTITION_MAP_NAME);
+            final int mapEntry = findVacantMapEntry(partitionsMap);
+//            System.out.println("Entry to be reserved: " + mapEntry);
+            if (mapEntry >= 0) {
+                mapReservation.setNewExpiryTime();
+                partitionsMap.put(mapEntry, mapReservation.toJson());
+            }
+            context.commitTransaction();
+            return mapEntry;
+        } catch (Throwable t) {
+            System.err.println("ReservationManager.reserve() caught exception: " + t);
+            t.printStackTrace(System.err);
+            context.rollbackTransaction();
+            return -1;
         }
-        return mapEntry;
     }
 
-    private int findVacantMapEntry() {
+    private int findVacantMapEntry(TransactionalMap partitionsMap) {
         final int reservationCount = partitionsMap.size();
-        if(reservationCount < PARTITION_COUNT) {
+        if (reservationCount < PARTITION_COUNT) {
             return reservationCount;
         }
-        for(int i = 0; i < PARTITION_COUNT; i++) {
-            final String representation = partitionsMap.get(i);
+        for (int i = 0; i < PARTITION_COUNT; i++) {
+            final String representation = (String) partitionsMap.get(i);
             try {
                 final MapReservation reservation = MapReservation.fromJson(representation);
                 if (reservation.getExpiryTime().before(this.mapReservation.getExpiryTime())) {
