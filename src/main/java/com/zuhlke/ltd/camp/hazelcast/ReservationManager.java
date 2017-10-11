@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.util.Map;
 
 class ReservationManager {
-    public static final int PARTITIONCOUNT = 1000;
+    public static final int PARTITION_COUNT = 1000;
 
     private final Map<Integer, String> partitionsMap;
     private final MapReservation mapReservation;
@@ -25,10 +25,10 @@ class ReservationManager {
 
     private int findVacantMapEntry() {
         final int reservationCount = partitionsMap.size();
-        if(reservationCount < PARTITIONCOUNT) {
+        if(reservationCount < PARTITION_COUNT) {
             return reservationCount;
         }
-        for(int i = 0; i < PARTITIONCOUNT; i++) {
+        for(int i = 0; i < PARTITION_COUNT; i++) {
             final String representation = partitionsMap.get(i);
             try {
                 final MapReservation reservation = MapReservation.fromJson(representation);
