@@ -22,11 +22,11 @@ import static org.junit.Assert.fail;
 
 public class MapReservationTest {
 
-    private final Config cfg = new Config();
-    private final HazelcastInstance hazelcastInstance = Hazelcast.newHazelcastInstance(cfg);
+    private HazelcastInstance hazelcastInstance;
 
     @Before
     public void setUp() {
+        hazelcastInstance = Hazelcast.newHazelcastInstance(new Config());
         final TransactionContext context = hazelcastInstance.newTransactionContext();
         try {
             context.beginTransaction();
@@ -42,7 +42,7 @@ public class MapReservationTest {
 
     @After
     public void tearDown() {
-
+        hazelcastInstance.shutdown();
     }
 
     @Test
@@ -58,45 +58,46 @@ public class MapReservationTest {
     }
 
     @Test
-    public void shouldReserveEntry() throws IOException {
+    public void shouldReservePartition() throws IOException {
         final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, "10000");
         final int partition = reservationManager.reserve();
         assertThat(partition, is(equalTo(0)));
     }
 
     @Test
-    public void shouldNotReserveEntryIfTableFull() throws IOException {
-        for(int i = 0; i < ReservationManager.PARTITION_COUNT; i++) {
-            final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, Integer.toString(10000 + i));
-            final int partition = reservationManager.reserve();
-//            assertThat(partition, is(equalTo(i)));
-        }
-        final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, Integer.toString(10000 + ReservationManager.PARTITION_COUNT));
+    public void shouldNotReservePartitionIfTableFull() throws IOException {
+        final int WORKER_COUNT = ReservationManager.PARTITION_COUNT;
+        reserveAllPartitions(WORKER_COUNT);
+        final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, Integer.toString(10000 + WORKER_COUNT));
         final int partition = reservationManager.reserve();
         assertThat(partition, is(equalTo(-1)));
     }
 
     @Test
-    public void shouldReserveEntryIfTableHasExpiredEntries() throws IOException {
+    public void shouldReservePartitionIfTableHasExpiredEntries() throws IOException {
         final int WORKER_COUNT = 5;
-        final List<ReservationManager> reservationManagers = new ArrayList<>(WORKER_COUNT);
-        for(int i = 0; i < WORKER_COUNT; i++) {
+        reserveAllPartitions(WORKER_COUNT);
+        final int midPartition = ReservationManager.PARTITION_COUNT / 2;
+        invalidatePartition(midPartition);
+        final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, Integer.toString(10000 + WORKER_COUNT));
+        final int partition = reservationManager.reserve();
+        assertThat(partition, is(equalTo(midPartition)));
+    }
+
+    private void reserveAllPartitions(int workerCount) {
+        final List<ReservationManager> reservationManagers = new ArrayList<>(workerCount);
+        for(int i = 0; i < workerCount; i++) {
             final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, Integer.toString(10000 + i));
             reservationManagers.add(reservationManager);
         }
         for(int i = 0; i < ReservationManager.PARTITION_COUNT; i++) {
-            final ReservationManager reservationManager = reservationManagers.get(i % WORKER_COUNT);
+            final ReservationManager reservationManager = reservationManagers.get(i % workerCount);
             final int partition = reservationManager.reserve();
             assertThat(partition, is(equalTo(i)));
         }
-        final int midKey = ReservationManager.PARTITION_COUNT / 2;
-        invalidateMapEntry(midKey);
-        final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, Integer.toString(10000 + WORKER_COUNT));
-        final int partition = reservationManager.reserve();
-        assertThat(partition, is(equalTo(midKey)));
     }
 
-    private String invalidateMapEntry(int key) {
+    private void invalidatePartition(int key) {
         final String reservation;
         final TransactionContext context = hazelcastInstance.newTransactionContext();
         try {
@@ -106,17 +107,15 @@ public class MapReservationTest {
             final String expiredReservation = reservation.replaceFirst("(\"expiryTime\"\\:)\\d+", "$13600");
             partitionsMap.put(key, expiredReservation);
             context.commitTransaction();
-            return reservation;
         } catch (Throwable t) {
             context.rollbackTransaction();
             t.printStackTrace(System.err);
-            fail("MapReservationTest.invalidateMapEntry() caught exception: " + t);
+            fail("MapReservationTest.invalidatePartition() caught exception: " + t);
         }
-        return null;
     }
-    
+
     @Test
-    public void shouldUpdateEntry() throws IOException {
+    public void shouldUpdatePartition() throws IOException {
         final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, "10000");
         final int partition = reservationManager.reserve();
         assertThat(partition, is(equalTo(0)));
@@ -128,5 +127,22 @@ public class MapReservationTest {
         final Date newExpiryTime = reservationManager.refreshTimestamp(partition);
         assertTrue("New expiry time " + newExpiryTime + " should be greater than " + originalExpiryTime,
                 newExpiryTime.after(originalExpiryTime));
+    }
+
+    @Test
+    public void shouldCompletePartition() throws IOException {
+        final int WORKER_COUNT = 4;
+        reserveAllPartitions(WORKER_COUNT);
+        final int firstPartition = 0;
+        final int fourthPartition = 4;
+        invalidatePartition(firstPartition);
+        invalidatePartition(fourthPartition);
+        final ReservationManager reservationManager = new ReservationManager(hazelcastInstance, "10000");
+        final int partition = reservationManager.reserve();
+        assertThat(partition, is(equalTo(firstPartition)));
+        final Date newExpiryTime = reservationManager.markCompleted(partition);
+        assertThat(newExpiryTime.getTime(), is(equalTo(-1L)));
+        final int newPartition = reservationManager.reserve();
+        assertThat(newPartition, is(equalTo(fourthPartition)));
     }
 }

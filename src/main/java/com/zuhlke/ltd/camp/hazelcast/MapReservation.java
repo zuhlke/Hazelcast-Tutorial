@@ -7,7 +7,9 @@ import java.io.StringWriter;
 import java.util.Date;
 
 public class MapReservation {
-    private static final long WORK_INTERVAL_MILLIS = 5000; // 5 sec
+    private static final long WORK_INTERVAL_MILLIS = 5000L; // 5 sec
+    private static final long FIDDLE_FACTOR_MILLIS = 200L; // Allow for clock disparity between instances
+    private static final long COMPLETED_TIMESTAMP  = -1L;
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private String workerId;
@@ -48,5 +50,17 @@ public class MapReservation {
 
     public void setNewExpiryTime() {
         expiryTime.setTime(System.currentTimeMillis() + WORK_INTERVAL_MILLIS);
+    }
+
+    public Date computeExpiryTimeLimit() {
+        return new Date(System.currentTimeMillis() + FIDDLE_FACTOR_MILLIS);
+    }
+
+    public void markCompleted() {
+        expiryTime.setTime(COMPLETED_TIMESTAMP);
+    }
+
+    public boolean notCompleted() {
+        return (expiryTime.getTime() != COMPLETED_TIMESTAMP);
     }
 }
