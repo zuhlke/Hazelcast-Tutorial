@@ -53,7 +53,7 @@ public class MapReservation {
     }
 
     public Date computeExpiryTimeLimit() {
-        return new Date(System.currentTimeMillis() + FIDDLE_FACTOR_MILLIS);
+        return new Date(System.currentTimeMillis() - FIDDLE_FACTOR_MILLIS);
     }
 
     public void markCompleted() {
